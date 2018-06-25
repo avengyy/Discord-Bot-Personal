@@ -75,6 +75,7 @@ bot.on('message', async message => {
     if (queue.length > 0 || isPlaying) {
       getId(query, id => {
         addQueue(id);
+        console.log(queue);
         fetchInfo(id, (err, videoInfo) => {
           if (err) throw new Error(err);
           message.channel.send(`Added to queue: **${videoInfo.title}**`);
@@ -84,7 +85,7 @@ bot.on('message', async message => {
     } else {
       isPlaying = true;
       getId(query, id => {
-        queue.push('placeholder');
+        addQueue(id);
         playSong(id, message);
         fetchInfo(id, (err, videoInfo) => {
           if (err) throw new Error(err);
@@ -152,23 +153,22 @@ bot.on('message', async message => {
     resumeSong(message);
   }
 
-  if (command === 'stfu') {
+  if (command === 'stop') {
     if (queue.length === 0)
       return message.channel.send('There is no loba loba playing right now');
 
-    forceEndSong(message);
+    if (!message.member.voiceChannel)
+      return message.reply("Can't find you loba loba, pls join da channel!");
+
+    forceEndSong();
   }
 });
 
 /**
  * Functions
  */
-const forceEndSong = message => {
-  dispatcher.end();
-
-  dispatcher.on('end', () => {
-    return message.channel.send('Loba loba is no more');
-  });
+const forceEndSong = () => {
+  dispatcher.destroy();
 };
 
 const resumeSong = message => {
@@ -183,20 +183,6 @@ const pauseSong = message => {
 
 const skipSong = message => {
   dispatcher.end();
-
-  dispatcher.on('end', () => {
-    // Reset Skip Requests again
-    resetSkip();
-    // Remove first song from list
-    queue.shift();
-    // Check if theres still songs remaining in list
-    if (queue.length === 0) {
-      queue = [];
-      isPlaying = false;
-    } else {
-      playSong(queue[0].id, message);
-    }
-  });
 };
 
 const playSong = (id, message) => {
@@ -225,6 +211,22 @@ const playSong = (id, message) => {
     resetSkip();
 
     dispatcher = connection.playStream(stream);
+
+    dispatcher.on('end', () => {
+      // Reset Skip Requests again
+      resetSkip();
+      // Remove first song from list
+      queue.shift();
+
+      console.log(queue);
+      // Check if theres still songs remaining in list
+      if (queue.length === 0) {
+        queue = [];
+        isPlaying = false;
+      } else {
+        playSong(queue[0].id, message);
+      }
+    });
   });
 };
 
@@ -248,7 +250,10 @@ const searchVideo = (queryText, callback) => {
       config.api_key,
     (err, response, body) => {
       const json = JSON.parse(body);
-      callback(json.items[0].id.videoId);
+      if (!json.items[0]) callback('3_-a9nVZYjk');
+      else {
+        callback(json.items[0].id.videoId);
+      }
     }
   );
 };
@@ -259,10 +264,10 @@ const isYoutube = str => {
 
 const addQueue = strId => {
   if (isYoutube(strId)) {
-    const videoId = getYouTubeID(strId);
-    fetchInfo(videoId, (err, videoInfo) => {
+    const vid = getYouTubeID(strId);
+    fetchInfo(vid, (err, videoInfo) => {
       const data = {
-        id: videoInfo.id,
+        id: videoInfo.videoId,
         title: videoInfo.title,
         url: videoInfo.url
       };
@@ -271,7 +276,7 @@ const addQueue = strId => {
   } else {
     fetchInfo(strId, (err, videoInfo) => {
       const data = {
-        id: videoInfo.id,
+        id: videoInfo.videoId,
         title: videoInfo.title,
         url: videoInfo.url
       };
