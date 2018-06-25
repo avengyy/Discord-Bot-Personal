@@ -18,6 +18,7 @@ let voiceChannel = null;
 let dispatcher = null;
 let skipReq = 0;
 let skippers = [];
+let currentChannel = null;
 
 bot.on('ready', () => {
   console.log(
@@ -65,27 +66,11 @@ bot.on('message', async message => {
   }
 
   if (command === 'play') {
-    // Init Voice Channel
+    // Set User's Voice Channel
     voiceChannel = message.member.voiceChannel;
 
     if (!message.member.voiceChannel)
-      return message.channel.send(
-        "Can't find you loba loba, pls join da channel!"
-      );
-
-    const permissions = voiceChannel.permissionsFor(message.client.user);
-
-    if (!permissions.has('CONNECT')) {
-      return message.channel.send(
-        "Can't join you for da loba loba, check da join permissions"
-      );
-    }
-
-    if (!permissions.has('SPEAK')) {
-      return message.channel.send(
-        "Can't play da loba loba, check da speakku permissions"
-      );
-    }
+      return message.reply("Can't find you loba loba, pls join da channel!");
 
     if (queue.length > 0 || isPlaying) {
       getId(query, id => {
@@ -112,9 +97,7 @@ bot.on('message', async message => {
 
   if (command === 'skip') {
     if (!message.member.voiceChannel)
-      return message.channel.send(
-        "Can't find you loba loba, pls join da channel!"
-      );
+      return message.reply("Can't find you loba loba, pls join da channel!");
 
     if (queue.length !== 0) {
       if (skippers.indexOf(message.author.id) === -1) {
@@ -140,23 +123,100 @@ bot.on('message', async message => {
   }
 
   if (command === 'np') {
-    fetchInfo(queue[0], (err, videoInfo) => {
-      if (err) throw new Error(err);
-      return message.channel.send(` Now Playing: **${videoInfo.title}**`);
-      bot.user.setActivity(`${videoInfo.title}`);
-    });
+    if (queue.length === 0)
+      return message.channel.send('There is no loba loba playing right now');
+
+    if (!message.member.voiceChannel)
+      return message.reply("Can't find you loba loba, pls join da channel!");
+
+    return message.channel.send(`Now playing: ${queue[0].title}`);
+  }
+
+  if (command === 'pause') {
+    if (queue.length === 0)
+      return message.channel.send('There is no loba loba playing right now');
+
+    if (!message.member.voiceChannel)
+      return message.reply("Can't find you loba loba, pls join da channel!");
+
+    pauseSong(message);
+  }
+
+  if (command === 'resume') {
+    if (queue.length === 0)
+      return message.channel.send('There is no loba loba playing right now');
+
+    if (!message.member.voiceChannel)
+      return message.reply("Can't find you loba loba, pls join da channel!");
+
+    resumeSong(message);
+  }
+
+  if (command === 'stfu') {
+    if (queue.length === 0)
+      return message.channel.send('There is no loba loba playing right now');
+
+    forceEndSong(message);
   }
 });
 
 /**
  * Functions
  */
+const forceEndSong = message => {
+  dispatcher.end();
+
+  dispatcher.on('end', () => {
+    return message.channel.send('Loba loba is no more');
+  });
+};
+
+const resumeSong = message => {
+  dispatcher.resume();
+  return message.channel.send('Resuming Loba loba');
+};
+
+const pauseSong = message => {
+  dispatcher.pause();
+  return message.channel.send('Loba loba taking a short break');
+};
+
 const skipSong = message => {
   dispatcher.end();
+
+  dispatcher.on('end', () => {
+    // Reset Skip Requests again
+    resetSkip();
+    // Remove first song from list
+    queue.shift();
+    // Check if theres still songs remaining in list
+    if (queue.length === 0) {
+      queue = [];
+      isPlaying = false;
+    } else {
+      playSong(queue[0].id, message);
+    }
+  });
 };
 
 const playSong = (id, message) => {
+  const permissions = voiceChannel.permissionsFor(message.client.user);
+
+  if (!permissions.has('CONNECT')) {
+    return message.channel.send(
+      "Can't join you for da loba loba, check da join permissions"
+    );
+  }
+
+  if (!permissions.has('SPEAK')) {
+    return message.channel.send(
+      "Can't play da loba loba, check da speakku permissions"
+    );
+  }
+
   voiceChannel.join().then(connection => {
+    currentChannel = { ...connection };
+
     stream = ytdl(`https://www.youtube.com/watch?v=${id}`, {
       filter: 'audioonly'
     });
@@ -165,26 +225,15 @@ const playSong = (id, message) => {
     resetSkip();
 
     dispatcher = connection.playStream(stream);
-    dispatcher.on('end', () => {
-      // Reset Skip Requests again
-      resetSkip();
-      // Remove first song from list
-      queue.shift();
-      // Check if theres still songs remaining in list
-      if (queue.length === 0) {
-        queue = [];
-        isPlaying = false;
-      } else {
-        playSong(queue[0], message);
-      }
-    });
   });
 };
 
 const getId = (str, callback) => {
   if (isYoutube(str)) {
+    // Returned Video ID
     callback(getYouTubeID(str));
   } else {
+    // Return Video ID
     searchVideo(str, id => {
       callback(id);
     });
@@ -210,9 +259,24 @@ const isYoutube = str => {
 
 const addQueue = strId => {
   if (isYoutube(strId)) {
-    queue.push(getYouTubeID(strId));
+    const videoId = getYouTubeID(strId);
+    fetchInfo(videoId, (err, videoInfo) => {
+      const data = {
+        id: videoInfo.id,
+        title: videoInfo.title,
+        url: videoInfo.url
+      };
+      queue.push(data);
+    });
   } else {
-    queue.push(strId);
+    fetchInfo(strId, (err, videoInfo) => {
+      const data = {
+        id: videoInfo.id,
+        title: videoInfo.title,
+        url: videoInfo.url
+      };
+      queue.push(data);
+    });
   }
 };
 
